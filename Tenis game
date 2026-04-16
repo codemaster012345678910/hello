@@ -1,0 +1,216 @@
+// 3D Tennis Game (Three.js) - game.js
+
+(function () {
+  // ----- Basic setup -----
+  const canvas = document.getElementById("gameCanvas");
+  if (!canvas) {
+    throw new Error("Canvas with id 'gameCanvas' not found.");
+  }
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: true
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.shadowMap.enabled = true;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x202030);
+
+  const camera = new THREE.PerspectiveCamera(
+    60,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  camera.position.set(0, 15, 25);
+  camera.lookAt(0, 0, 0);
+
+  // ----- Lights -----
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(10, 20, 10);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(1024, 1024);
+  scene.add(dirLight);
+
+  // ----- Court -----
+  const courtWidth = 12;
+  const courtDepth = 24;
+
+  const courtGeo = new THREE.PlaneGeometry(courtWidth, courtDepth);
+  const courtMat = new THREE.MeshPhongMaterial({ color: 0x1b5e20 });
+  const court = new THREE.Mesh(courtGeo, courtMat);
+  court.rotation.x = -Math.PI / 2;
+  court.receiveShadow = true;
+  scene.add(court);
+
+  // Center line
+  const lineGeo = new THREE.PlaneGeometry(courtWidth * 0.9, 0.1);
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const centerLine = new THREE.Mesh(lineGeo, lineMat);
+  centerLine.rotation.x = -Math.PI / 2;
+  centerLine.position.z = 0;
+  centerLine.position.y = 0.01;
+  scene.add(centerLine);
+
+  // ----- Paddle -----
+  const paddleWidth = 2;
+  const paddleDepth = 0.5;
+  const paddleHeight = 0.3;
+
+  const paddleGeo = new THREE.BoxGeometry(
+    paddleWidth,
+    paddleHeight,
+    paddleDepth
+  );
+  const paddleMat = new THREE.MeshPhongMaterial({ color: 0x2196f3 });
+  const paddle = new THREE.Mesh(paddleGeo, paddleMat);
+  paddle.castShadow = true;
+  paddle.receiveShadow = true;
+  paddle.position.set(0, paddleHeight / 2, courtDepth * 0.4);
+  scene.add(paddle);
+
+  // ----- Ball -----
+  const ballRadius = 0.4;
+  const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+  const ballMat = new THREE.MeshPhongMaterial({ color: 0xffeb3b });
+  const ball = new THREE.Mesh(ballGeo, ballMat);
+  ball.castShadow = true;
+  ball.receiveShadow = true;
+  ball.position.set(0, ballRadius, 0);
+  scene.add(ball);
+
+  // Ball velocity
+  const ballVelocity = new THREE.Vector3(
+    Math.random() * 0.4 - 0.2,
+    0,
+    0.25
+  );
+
+  // ----- Input -----
+  const keys = {
+    ArrowLeft: false,
+    ArrowRight: false,
+    ArrowUp: false,
+    ArrowDown: false,
+    a: false,
+    d: false,
+    w: false,
+    s: false
+  };
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key in keys) {
+      keys[e.key] = true;
+    }
+  });
+
+  window.addEventListener("keyup", function (e) {
+    if (e.key in keys) {
+      keys[e.key] = false;
+    }
+  });
+
+  // ----- Resize handling -----
+  window.addEventListener("resize", function () {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    renderer.setSize(width, height);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  });
+
+  // ----- Game logic -----
+  const clock = new THREE.Clock();
+
+  function updatePaddle(delta) {
+    const speed = 10;
+    let moveX = 0;
+    let moveZ = 0;
+
+    if (keys.ArrowLeft || keys.a) moveX -= 1;
+    if (keys.ArrowRight || keys.d) moveX += 1;
+    if (keys.ArrowUp || keys.w) moveZ -= 1;
+    if (keys.ArrowDown || keys.s) moveZ += 1;
+
+    if (moveX !== 0 || moveZ !== 0) {
+      const len = Math.hypot(moveX, moveZ);
+      if (len > 0) {
+        moveX /= len;
+        moveZ /= len;
+      }
+    }
+
+    paddle.position.x += moveX * speed * delta;
+    paddle.position.z += moveZ * speed * delta;
+
+    const halfW = courtWidth / 2 - paddleWidth / 2;
+    const halfD = courtDepth / 2 - 1;
+
+    paddle.position.x = Math.max(-halfW, Math.min(halfW, paddle.position.x));
+    paddle.position.z = Math.max(0, Math.min(halfD, paddle.position.z));
+  }
+
+  function updateBall(delta) {
+    ball.position.addScaledVector(ballVelocity, delta * 10);
+
+    const halfW = courtWidth / 2 - ballRadius;
+    if (ball.position.x < -halfW) {
+      ball.position.x = -halfW;
+      ballVelocity.x *= -1;
+    } else if (ball.position.x > halfW) {
+      ball.position.x = halfW;
+      ballVelocity.x *= -1;
+    }
+
+    const halfD = courtDepth / 2 - ballRadius;
+    if (ball.position.z < -halfD) {
+      ball.position.z = -halfD;
+      ballVelocity.z *= -1;
+    } else if (ball.position.z > halfD) {
+      ball.position.z = halfD;
+      ballVelocity.z *= -1;
+    }
+
+    // Paddle collision
+    const paddleMin = new THREE.Vector3(
+      paddle.position.x - paddleWidth / 2,
+      0,
+      paddle.position.z - paddleDepth / 2
+    );
+    const paddleMax = new THREE.Vector3(
+      paddle.position.x + paddleWidth / 2,
+      paddleHeight,
+      paddle.position.z + paddleDepth / 2
+    );
+
+    const closestPoint = new THREE.Vector3(
+      THREE.MathUtils.clamp(ball.position.x, paddleMin.x, paddleMax.x),
+      THREE.MathUtils.clamp(ball.position.y, paddleMin.y, paddleMax.y),
+      THREE.MathUtils.clamp(ball.position.z, paddleMin.z, paddleMax.z)
+    );
+
+    const distSq = ball.position.distanceToSquared(closestPoint);
+    if (distSq <= ballRadius * ballRadius) {
+      ballVelocity.z = -Math.abs(ballVelocity.z);
+      const hitOffset = ball.position.x - paddle.position.x;
+      ballVelocity.x += hitOffset * 0.05;
+      ball.position.z =
+        paddle.position.z - paddleDepth / 2 - ballRadius - 0.01;
+    }
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    updatePaddle(delta);
+    updateBall(delta);
+    renderer.render(scene, camera);
+  }
+
+  animate();
+})();
